@@ -4,9 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="theme-color" content="#1a1614">
+<meta name="color-scheme" content="dark">
 <title>ZUGZWANG</title>
 <style>
   :root{
+    color-scheme:dark;
     --bg:#1a1614; --panel:#221c19; --panel2:#2b231f;
     --ink:#efe7da; --muted:#a99c8c; --line:#3a302a;
     --red:#b5322b; --red-dk:#7d201c; --brass:#c9a35a;
@@ -31,7 +33,7 @@
   /* 하단에 항상 이만큼 여백을 둬서, 시트가 접혀있든 펼쳐지든(분석을 켜고 꺼도) 체스판이
      차지하는 공간(=아래쪽 flex 배분)이 절대 흔들리지 않게 한다 — 시트는 position:fixed라
      이 레이아웃 흐름 밖에서 오버레이될 뿐, 체스판 크기에는 관여하지 않는다. */
-  #app{display:flex;flex-direction:column;flex:1;min-height:0;padding-bottom:var(--sheetPeek)}
+  #app{display:flex;flex-direction:column;flex:1;min-height:0;padding-bottom:calc(var(--sheetPeek) + clamp(60px,15dvh,160px))}
   .eyebrow{font:600 11px/1.2 "Arial Narrow",Arial,sans-serif;letter-spacing:.32em;text-transform:uppercase;color:var(--brass)}
   header{position:relative;z-index:41;border-bottom:2px solid var(--red);padding-bottom:8px;margin-bottom:8px;flex:0 0 auto}
   header .hdrRow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
@@ -201,6 +203,10 @@
   .vnChoices button{width:100%;text-align:left;background:var(--panel2);flex:none;font-size:14px;
     animation:vnBtnIn .32s ease both}
   .vnChoices button:hover{border-color:var(--brass)}
+  /* 이미 다 얘기한 화제/질문 — 배경을 지우고 글자를 흐리게 해 "이미 얘기했다"가 한눈에
+     구분되게 한다. 하위 질문을 전부 나눈 화제는 renderChatTopicPage에서 같은 클래스를 받는다. */
+  .vnChoices button.visited{background:transparent;color:var(--muted)}
+  .vnChoices button.visited:hover{border-color:var(--brass);color:var(--ink)}
   .vnChoices .skipBtn{margin-top:6px;background:transparent;border:1px dashed var(--line);
     color:var(--muted);font-size:11.5px;padding:8px 10px;text-align:center}
   .vnStage{flex:0 0 auto;display:flex;align-items:flex-end;justify-content:flex-start;
@@ -229,14 +235,14 @@
      펼쳐있든, 분석 중이든 아니든 체스판은 항상 같은 크기(§app의 --sheetPeek 여백만 고정 예약). */
   .bottomSheet{position:fixed;left:0;right:0;bottom:0;margin:0 auto;max-width:520px;
     height:min(68vh,520px);
-    background:linear-gradient(180deg,var(--panel2),var(--panel));
+    background:var(--bg);
     border:1px solid var(--line);border-bottom:none;border-radius:14px 14px 0 0;
-    box-shadow:0 -14px 34px rgba(0,0,0,.5);
+    box-shadow:none;
     display:flex;flex-direction:column;z-index:35;
     transform:translateY(calc(100% - var(--sheetPeek)));
-    transition:transform .32s cubic-bezier(.22,.68,0,1.15);
+    transition:transform .32s cubic-bezier(.22,.68,0,1.15), box-shadow .32s ease;
   }
-  .bottomSheet.expanded{transform:translateY(0)}
+  .bottomSheet.expanded{transform:translateY(0);box-shadow:0 -14px 34px rgba(0,0,0,.5)}
   .sheetHandle{flex:0 0 auto;height:20px;display:flex;align-items:center;justify-content:center;
     cursor:pointer;touch-action:none}
   .sheetGrip{width:36px;height:4px;border-radius:999px;background:var(--line);transition:background .15s}
@@ -1265,6 +1271,17 @@ var PST={
     [-20,-30,-30,-40,-40,-30,-30,-20],[-10,-20,-20,-20,-20,-20,-20,-10],
     [20,20,0,0,0,0,20,20],[20,30,10,0,0,10,30,20]]
 };
+/* 엔드게임 전용 킹 표 — 기물이 줄어들수록(테이퍼드 이밸류에이션) 위 PST.k(구석 웅크림)에서
+   이 표(중앙 진출)로 섞여 들어간다. 폰 엔딩 등에서 킹을 구석에 방치하던 문제를 바로잡는다. */
+var PST_KE=[
+ [-50,-40,-30,-20,-20,-30,-40,-50],[-30,-20,-10,0,0,-10,-20,-30],
+ [-30,-10,20,30,30,20,-10,-30],[-30,-10,30,40,40,30,-10,-30],
+ [-30,-10,30,40,40,30,-10,-30],[-30,-10,20,30,30,20,-10,-30],
+ [-30,-30,0,0,0,0,-30,-30],[-50,-30,-30,-30,-30,-30,-30,-50]
+];
+/* 테이퍼링 기준 총 페이즈 24(양쪽 합산: (N1+B1)*2*2 + R2*2*2 + Q4*2 = 24)에서 위 두 킹 표를 보간 */
+var PHASE_W={p:0,n:1,b:1,r:2,q:4,k:0};
+var BISHOP_PAIR=30, DOUBLED_PAWN=12, ISOLATED_PAWN=10, ROOK_OPEN=15, ROOK_SEMI=8;
 
 /* ===== 상태 ===== */
 var game, opp=CHARACTERS[0], playerColor="w";
@@ -1421,11 +1438,32 @@ function humanDelay(){
 function stm(){ return game.turn()==="w" ? 1 : -1; }
 function evaluate(){
   var b=game.board(), s=0;
+  var wFiles=[0,0,0,0,0,0,0,0], bFiles=[0,0,0,0,0,0,0,0];
+  var wBishops=0, bBishops=0, wRookFiles=[], bRookFiles=[];
+  var wKingSq=null, bKingSq=null, phaseMat=0;
   for(var r=0;r<8;r++) for(var c=0;c<8;c++){
     var sq=b[r][c]; if(!sq) continue;
+    if(sq.type==="k"){ if(sq.color==="w") wKingSq=[r,c]; else bKingSq=[r,c]; continue; }
     var pst = sq.color==="w" ? PST[sq.type][r][c] : PST[sq.type][7-r][c];
     s += (sq.color==="w") ? (VAL[sq.type]+pst) : -(VAL[sq.type]+pst);
+    phaseMat += PHASE_W[sq.type]||0;
+    if(sq.type==="p") (sq.color==="w"?wFiles:bFiles)[c]++;
+    else if(sq.type==="b"){ if(sq.color==="w") wBishops++; else bBishops++; }
+    else if(sq.type==="r"){ (sq.color==="w"?wRookFiles:bRookFiles).push(c); }
   }
+  if(wBishops>=2) s+=BISHOP_PAIR;
+  if(bBishops>=2) s-=BISHOP_PAIR;
+  for(var f=0;f<8;f++){
+    if(wFiles[f]>1) s -= DOUBLED_PAWN*(wFiles[f]-1);
+    if(bFiles[f]>1) s += DOUBLED_PAWN*(bFiles[f]-1);
+    if(wFiles[f]>0 && (f===0||wFiles[f-1]===0) && (f===7||wFiles[f+1]===0)) s -= ISOLATED_PAWN*wFiles[f];
+    if(bFiles[f]>0 && (f===0||bFiles[f-1]===0) && (f===7||bFiles[f+1]===0)) s += ISOLATED_PAWN*bFiles[f];
+  }
+  for(var i=0;i<wRookFiles.length;i++){ var wf=wRookFiles[i]; if(wFiles[wf]===0) s += (bFiles[wf]===0)?ROOK_OPEN:ROOK_SEMI; }
+  for(var j=0;j<bRookFiles.length;j++){ var bf=bRookFiles[j]; if(bFiles[bf]===0) s -= (wFiles[bf]===0)?ROOK_OPEN:ROOK_SEMI; }
+  var phase=Math.max(0,Math.min(1, phaseMat/24)); // 1=기물 가득(오프닝/미들), 0=엔드게임
+  if(wKingSq){ s += PST.k[wKingSq[0]][wKingSq[1]]*phase + PST_KE[wKingSq[0]][wKingSq[1]]*(1-phase); }
+  if(bKingSq){ var br=7-bKingSq[0]; s -= PST.k[br][bKingSq[1]]*phase + PST_KE[br][bKingSq[1]]*(1-phase); }
   return s; // 백 관점
 }
 function keyOf(m){
@@ -1517,12 +1555,17 @@ function bookMove(p){
   return null;
 }
 
-/* 한 위치의 모든 합법수를 "정적 정렬 → 윈도우 알파베타"로 평가해 base(객관적 평가) 내림차순으로
-   반환. chooseMoveAsync(대국 중 착수)와 대국 분석(§evalAllMoves 재사용) 양쪽에서 공유하는 탐색
-   코어 — styleBias(기풍)는 여기 섞지 않는다, 순수 객관 평가만. 이 함수 자체는 여전히 동기 함수
-   그대로다: 평소엔 워커 스레드 안에서(§buildEngineWorkerSrc가 이 함수의 소스를 그대로 심음)
-   돌고, 워커를 못 쓸 때만 메인 스레드에서 폴백으로 직접 호출된다. */
-function evalAllMoves(depth, qd, budgetMs){
+/* 한 위치의 모든 합법수를 "반복 심화(iterative deepening) → 윈도우 알파베타"로 평가해
+   base(객관적 평가) 내림차순으로 반환. chooseMoveAsync(대국 중 착수)와 대국 분석(§evalAllMoves
+   재사용) 양쪽에서 공유하는 탐색 코어 — styleBias(기풍)는 여기 섞지 않는다, 순수 객관 평가만.
+   깊이 1부터 목표 depth까지 라운드를 반복하며, 각 라운드가 끝날 때마다 그 라운드의 점수로 다음
+   라운드의 탐색 순서를 다시 정렬한다(좋은 수를 먼저 봐야 알파베타가 더 많이 잘라낸다). 시간
+   예산(budgetMs)이 도중에 바닥나면 "끝까지 완료된 가장 깊은 라운드"를 그대로 반환하므로, 예전처럼
+   일부 후보수가 통째로 평가되지 못한 채 빠지는 일이 없다 — 항상 전체 합법수가 같은 깊이 기준으로
+   채점된 상태를 보장한다. 이 함수 자체는 여전히 동기 함수 그대로다: 평소엔 워커 스레드 안에서
+   (§buildEngineWorkerSrc가 이 함수의 소스를 그대로 심음) 돌고, 워커를 못 쓸 때만 메인 스레드에서
+   폴백으로 직접 호출된다. */
+function evalAllMoves(depth, qd, budgetMs, forceSan){
   var legal=game.moves({verbose:true});
   if(!legal.length) return [];
   ABORT=false; DEADLINE=Date.now()+budgetMs;
@@ -1532,20 +1575,53 @@ function evalAllMoves(depth, qd, budgetMs){
     game.move(legal[i]); pre.push({m:legal[i], sv:-(stm()*evaluate())}); game.undo();
   }
   pre.sort(function(a,b){return b.sv-a.sv;});
-  var MARGIN=90, best=-INF, scored=[];
-  for(var j=0;j<pre.length;j++){
-    var mv=pre[j].m;
-    game.move(mv);
-    var betaChild=(best===-INF)?INF:-(best-MARGIN);
-    var base=-negamax(depth-1,-INF,betaChild,1);
-    game.undo();
-    scored.push({m:mv, base:base});
-    if(base>best) best=base;
+  var rootOrder=[]; for(var oi=0;oi<pre.length;oi++) rootOrder.push(pre[oi].m);
+  var lastComplete=null; // 지금까지 "끝까지 완료된" 가장 깊은 라운드의 결과
+  for(var d=1; d<=depth; d++){
     if(ABORT) break;
+    var MARGIN=90, best=-INF, scored=[], complete=true;
+    for(var j=0;j<rootOrder.length;j++){
+      var mv=rootOrder[j];
+      game.move(mv);
+      var betaChild=(best===-INF)?INF:-(best-MARGIN);
+      var base=-negamax(d-1,-INF,betaChild,1);
+      game.undo();
+      scored.push({m:mv, base:base});
+      if(base>best) best=base;
+      if(ABORT){ complete=false; break; }
+    }
+    scored.sort(function(a,b){return b.base-a.base;});
+    if(complete){
+      lastComplete=scored;
+      rootOrder=[]; for(var k=0;k<scored.length;k++) rootOrder.push(scored[k].m);
+    } else if(!lastComplete){
+      // 가장 얕은 라운드(보통 d=1)조차 다 못 끝냈을 만큼 예산이 빠듯하면, 그때까지라도 평가된
+      // 것만으로 결과를 구성한다 — 그래도 "아예 채점 안 됨"보다는 낫다.
+      lastComplete=scored;
+    }
+  }
+  var result=lastComplete;
+  /* 그럼에도 forceSan(실제로 둔 수)이 마지막 결과에 없으면(극단적으로 예산이 작아 가장 얕은
+     라운드조차 그 수 차례가 오기 전에 끊긴 경우), 호출부(analysisStep)가 "손실 계산 불가 →
+     무조건 좋은 수"로 잘못 채점하지 않도록 예산과 무관하게 이 수만은 반드시 한 번 평가해 둔다. */
+  if(forceSan){
+    var already=false;
+    for(var fk=0;fk<result.length;fk++){ if(result[fk].m.san===forceSan){ already=true; break; } }
+    if(!already){
+      for(var fi=0;fi<rootOrder.length;fi++){
+        if(rootOrder[fi].san===forceSan){
+          game.move(rootOrder[fi]);
+          var fbase=-negamax(0,-INF,INF,1);
+          game.undo();
+          result.push({m:rootOrder[fi], base:fbase});
+          result.sort(function(a,b){return b.base-a.base;});
+          break;
+        }
+      }
+    }
   }
   QUIESCE_DEPTH=savedQD;
-  scored.sort(function(a,b){return b.base-a.base;});
-  return scored;
+  return result;
 }
 
 /* ===== 탐색용 Web Worker =====
@@ -1561,6 +1637,9 @@ function buildEngineWorkerSrc(){
   var parts=[
     "var VAL="+JSON.stringify(VAL)+";",
     "var PST="+JSON.stringify(PST)+";",
+    "var PST_KE="+JSON.stringify(PST_KE)+";",
+    "var PHASE_W="+JSON.stringify(PHASE_W)+";",
+    "var BISHOP_PAIR="+BISHOP_PAIR+", DOUBLED_PAWN="+DOUBLED_PAWN+", ISOLATED_PAWN="+ISOLATED_PAWN+", ROOK_OPEN="+ROOK_OPEN+", ROOK_SEMI="+ROOK_SEMI+";",
     "var MATE="+MATE+", INF="+INF+";",
     "var CDNS="+JSON.stringify(CDNS)+";",
     "var QUIESCE_DEPTH=2, ABORT=false, DEADLINE=0, game=null;",
@@ -1580,7 +1659,7 @@ function buildEngineWorkerSrc(){
     "  if(!chessLoaded){ postMessage({type:'error',reqId:d.reqId}); return; }",
     "  try{",
     "    game=new Chess(d.fen);",
-    "    var scored=evalAllMoves(d.depth,d.qd,d.budgetMs);",
+    "    var scored=evalAllMoves(d.depth,d.qd,d.budgetMs,d.forceSan);",
     "    var out=[];",
     "    for(var i=0;i<scored.length;i++){",
     "      var mv=scored[i].m;",
@@ -1612,12 +1691,12 @@ function getEngineWorker(){
 }
 /* fen 기준 국면을 워커에서 평가. 콜백은 scored 배열({san,from,to,promotion,base}[], base 내림차순)을
    받거나, 워커를 못 쓰면 null을 받는다(호출부가 evalAllMoves()로 폴백해야 함). */
-function evalAllMovesAsync(fen, depth, qd, budgetMs, cb){
+function evalAllMovesAsync(fen, depth, qd, budgetMs, cb, forceSan){
   try{
     var w=getEngineWorker();
     var id=++engineWorkerReqSeq;
     engineWorkerPending[id]=cb;
-    w.postMessage({reqId:id, fen:fen, depth:depth, qd:qd, budgetMs:budgetMs});
+    w.postMessage({reqId:id, fen:fen, depth:depth, qd:qd, budgetMs:budgetMs, forceSan:forceSan||null});
   }catch(e){
     cb(null);
   }
@@ -1859,7 +1938,7 @@ function analysisStep(i){
   var fen=game.fen();
   evalAllMovesAsync(fen, ANALYSIS_DEPTH, ANALYSIS_QD, ANALYSIS_BUDGET_PER_MOVE, function(scored){
     if(!scored){
-      var full=evalAllMoves(ANALYSIS_DEPTH, ANALYSIS_QD, ANALYSIS_BUDGET_PER_MOVE);
+      var full=evalAllMoves(ANALYSIS_DEPTH, ANALYSIS_QD, ANALYSIS_BUDGET_PER_MOVE, entry.san);
       scored=full.map(function(s){ return {san:s.m.san, base:s.base}; });
     }
     var bestEntry=scored.length?scored[0]:null, actualEntry=null;
@@ -1879,7 +1958,7 @@ function analysisStep(i){
                bestSan:bestEntry.san, lossCp:lossCp, label:tier.label, symbol:tier.symbol};
     }
     analysisStepFinish(i, entry, result);
-  });
+  }, entry.san);
 }
 function analysisStepFinish(i, entry, result){
   game.move(entry.san);
@@ -1945,7 +2024,10 @@ function renderChatTopicPage(page){
   var wrap=document.getElementById("vnChoices"); wrap.innerHTML="";
   set.slice(page*CHAT_PAGE_SIZE, page*CHAT_PAGE_SIZE+CHAT_PAGE_SIZE).forEach(function(entry){
     var btn=document.createElement("button");
-    btn.textContent = entry.type==="more" ? entry.label : chatTopicLabel(entry);
+    var label = entry.type==="more" ? entry.label : chatTopicLabel(entry);
+    var visited = entry.subs && entry.subs.length>0 && entry.subs.every(function(s){ return s._visited; });
+    if(visited){ btn.classList.add("visited"); label="✓ "+label; }
+    btn.textContent = label;
     btn.onclick=function(){ selectChatTopic(entry); };
     wrap.appendChild(btn);
   });
@@ -1973,7 +2055,8 @@ function renderChatSubs(entry, page){
   var wrap=document.getElementById("vnChoices"); wrap.innerHTML="";
   subs.slice(page*CHAT_PAGE_SIZE, page*CHAT_PAGE_SIZE+CHAT_PAGE_SIZE).forEach(function(sub){
     var btn=document.createElement("button");
-    btn.textContent=sub.q;
+    if(sub._visited){ btn.classList.add("visited"); btn.textContent="✓ "+sub.q; }
+    else btn.textContent=sub.q;
     btn.onclick=function(){ selectChatSub(sub); };
     wrap.appendChild(btn);
   });
@@ -1990,6 +2073,7 @@ function renderChatSubs(entry, page){
 }
 function selectChatSub(sub){
   chatExchangeCount++;
+  sub._visited=true;
   var variants=sub.a;
   var variant=variants[Math.floor(Math.random()*variants.length)];
   if(variants.length>1){

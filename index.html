@@ -18,7 +18,13 @@
     --sheetPeek:64px; /* 하단 시트가 접혀 있을 때 항상 보이는 높이(그립+컨트롤 행) */
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
+  /* body에 height:100%(고정 높이)를 주지 않는다 — 그렇게 하면 body가 뷰포트에 딱 고정돼
+     버려서(아래 min-height는 그저 바닥값), #app(flex:1;min-height:0)이 콘텐츠+패딩과 무관하게
+     그 고정 높이 안으로 눌려 들어가(overflow) 버리고, 문서 자체가 전혀 스크롤되지 않는
+     문제가 생긴다(체스판 아래쪽이 늘 잘리고 스크롤도 안 내려가던 원인). height는 지정하지
+     않고 min-height만 둬서, 콘텐츠가 한 화면보다 길면 body가 그만큼 늘어나 스크롤되게 한다. */
+  html,body{margin:0}
+  body.menu-open{overflow:hidden}
   body{
     background:
       radial-gradient(120% 60% at 50% -10%, #2a201b 0%, var(--bg) 55%),
@@ -32,8 +38,11 @@
   }
   /* 하단에 항상 이만큼 여백을 둬서, 시트가 접혀있든 펼쳐지든(분석을 켜고 꺼도) 체스판이
      차지하는 공간(=아래쪽 flex 배분)이 절대 흔들리지 않게 한다 — 시트는 position:fixed라
-     이 레이아웃 흐름 밖에서 오버레이될 뿐, 체스판 크기에는 관여하지 않는다. */
-  #app{display:flex;flex-direction:column;flex:1;min-height:0;padding-bottom:calc(var(--sheetPeek) + clamp(60px,15dvh,160px))}
+     이 레이아웃 흐름 밖에서 오버레이될 뿐, 체스판 크기에는 관여하지 않는다.
+     여백을 넉넉하게 잡아서(예전보다 큼) 끝까지 스크롤했을 때 체스판 1행과 잡은/잡힌 기물
+     트레이가 접힌 시트(그립+컨트롤 행)에 가리지 않고 확실히 위로 올라오게 한다 — 그 대신
+     화면 위쪽(인물 프로필/대사박스)이 스크롤로 가려지는 건 감수한다. */
+  #app{display:flex;flex-direction:column;flex:1;min-height:0;padding-bottom:calc(var(--sheetPeek) + clamp(30px,12dvh,90px))}
   .eyebrow{font:600 11px/1.2 "Arial Narrow",Arial,sans-serif;letter-spacing:.32em;text-transform:uppercase;color:var(--brass)}
   header{position:relative;z-index:41;border-bottom:2px solid var(--red);padding-bottom:8px;margin-bottom:8px;flex:0 0 auto}
   header .hdrRow{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
@@ -1396,12 +1405,14 @@ function openMenu(){
   positionMenuPanel();
   renderPastGamesList();
   document.getElementById("menuScrim").classList.add("show");
+  document.body.classList.add("menu-open");
   var btn=document.getElementById("menuBtn");
   btn.textContent="✕";
   btn.setAttribute("aria-label","메뉴 닫기");
 }
 function closeMenu(){
   document.getElementById("menuScrim").classList.remove("show");
+  document.body.classList.remove("menu-open");
   var btn=document.getElementById("menuBtn");
   btn.textContent="☰";
   btn.setAttribute("aria-label","메뉴 열기");
